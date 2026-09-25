@@ -120,6 +120,8 @@ type Config struct {
 	Interval            int
 	Cookies             string
 	UserAgent           string
+	StripchatCookies    string
+	StripchatUserAgent  string
 	Domain              string
 	CompletedDir        string
 	FinalizeMode        string

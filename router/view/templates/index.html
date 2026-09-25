@@ -216,31 +216,31 @@
                     <div class="ts-content is-vertically-padded">
                         <!-- Browser Import -->
                         <div class="ts-control is-wide">
-                            <div class="label">Browser Import</div>
+                            <div class="label">Chaturbate Browser Import</div>
                             <div class="content">
                                 <div class="ts-input">
-                                    <textarea name="browser_export" rows="6" placeholder="Paste Firefox 'Copy as cURL' here to auto-import cookies and User-Agent"></textarea>
+                                    <textarea name="browser_export" rows="6" placeholder="Paste Chrome or Firefox 'Copy as cURL' here"></textarea>
                                 </div>
-                                <div class="ts-text is-description has-top-spaced-small">Recommended for quick updates: paste a fresh Firefox <code>Copy as cURL</code> request for <code>chatvideocontext</code> or <code>biocontext</code>, then save. The app will extract the cookie jar and User-Agent automatically, and it skips room-specific <code>tbu_*</code> cookies.</div>
+                                <div class="ts-text is-description has-top-spaced-small">Paste a successful Chrome or Firefox <code>Copy as cURL</code> request, then save. Cookies and User-Agent are extracted automatically. Requests to Stripchat are saved to the Stripchat fields below. Use cURL (bash) when your browser offers a choice.</div>
                             </div>
                         </div>
                         <!-- / Browser Import -->
 
                         <!-- Cookies -->
                         <div class="ts-control is-wide has-top-spaced-large">
-                            <div class="label">Cookies</div>
+                            <div class="label">Chaturbate Cookies</div>
                             <div class="content">
                                 <div class="ts-input">
                                     <textarea name="cookies" rows="7" placeholder="Paste the full browser Cookie header or a semicolon-separated cookie string">{{ .Config.Cookies }}</textarea>
                                 </div>
-                                <div class="ts-text is-description has-top-spaced-small">Paste the full cookie string from your browser when values rotate. Raw <code>Cookie:</code> lines are accepted and persisted in <code>conf/settings.json</code>. If you paste only <code>cf_clearance=...</code>, the app updates that cookie while keeping the rest of the stored cookie jar. Room-specific <code>tbu_*</code> cookies are dropped automatically. See <a class="ts-text is-link" href="https://github.com/teacat/goondvr/?tab=readme-ov-file#-cookies--user-agent" target="_blank">README</a> for details.</div>
+                                <div class="ts-text is-description has-top-spaced-small">Paste the full cookie string from your browser when values rotate. Raw <code>Cookie:</code> lines are accepted and persisted in <code>conf/settings.json</code>. If you paste only <code>cf_clearance=...</code>, the app updates that cookie while keeping the rest of the stored cookie jar. Room-specific <code>tbu_*</code> cookies are dropped automatically. See <a class="ts-text is-link" href="https://github.com/Last-Xuan-ai/goondvr#stripchat-cookie-fix-this-fork" target="_blank">README</a> for details.</div>
                             </div>
                         </div>
                         <!-- / Cookies -->
 
                         <!-- User Agent -->
                         <div class="ts-control is-wide has-top-spaced-large">
-                            <div class="label">User Agent</div>
+                            <div class="label">Chaturbate User Agent</div>
                             <div class="content">
                                 <div class="ts-input">
                                     <textarea name="user_agent" rows="5">{{ .Config.UserAgent }}</textarea>
@@ -249,6 +249,36 @@
                             </div>
                         </div>
                         <!-- / User Agent -->
+
+                        <!-- Stripchat credentials -->
+                        <div class="ts-divider"></div>
+                        <div class="ts-control is-wide has-top-spaced-large">
+                            <div class="label">Stripchat Browser Import</div>
+                            <div class="content">
+                                <div class="ts-input">
+                                    <textarea name="stripchat_browser_export" rows="6" placeholder="Paste a successful Stripchat request copied as cURL from Chrome or Firefox"></textarea>
+                                </div>
+                                <div class="ts-text is-description has-top-spaced-small">Open a room in your browser, refresh with DevTools Network open, and copy a successful request to <code>stripchat.com</code> as cURL. Cookies and User-Agent are saved together below. Use the same proxy exit for your browser and DVR.</div>
+                            </div>
+                        </div>
+                        <div class="ts-control is-wide has-top-spaced-large">
+                            <div class="label">Stripchat Cookies</div>
+                            <div class="content">
+                                <div class="ts-input">
+                                    <textarea name="stripchat_cookies" rows="5" placeholder="name=value; name2=value2">{{ .Config.StripchatCookies }}</textarea>
+                                </div>
+                                <div class="ts-text is-description has-top-spaced-small">Copy the full Cookie request header. These cookies are used only for Stripchat, including the API and player page. A cf_clearance cookie is not required if your browser has none.</div>
+                            </div>
+                        </div>
+                        <div class="ts-control is-wide has-top-spaced-large">
+                            <div class="label">Stripchat User Agent</div>
+                            <div class="content">
+                                <div class="ts-input">
+                                    <textarea name="stripchat_user_agent" rows="3" placeholder="User-Agent from the same browser request">{{ .Config.StripchatUserAgent }}</textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- / Stripchat credentials -->
 
                         <!-- Browser Fetch -->
                         <div class="ts-control is-wide has-top-spaced-large">

@@ -27,7 +27,7 @@ const logo = `
 func main() {
 	app := &cli.App{
 		Name:    "goondvr",
-		Version: "4.0.1",
+		Version: "4.0.1-stripchat.1",
 		Usage:   "Record your favorite streams automatically. 😎🫵",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -96,6 +96,14 @@ func main() {
 				Name:  "user-agent",
 				Usage: "Custom User-Agent for the request",
 				Value: "",
+			},
+			&cli.StringFlag{
+				Name:  "stripchat-cookies",
+				Usage: "Stripchat Cookie header, kept separate from Chaturbate cookies",
+			},
+			&cli.StringFlag{
+				Name:  "stripchat-user-agent",
+				Usage: "User-Agent from the browser used for Stripchat cookies",
 			},
 			&cli.StringFlag{
 				Name:  "domain",

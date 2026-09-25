@@ -503,7 +503,8 @@ func fetchStripchatPlayerPage(ctx context.Context, pageURL string) (string, erro
 }
 
 func setStripchatBrowserHeaders(req *http.Request) {
-	ua := server.Config.UserAgent
+	internal.SetSiteAuthHeaders(req)
+	ua := req.Header.Get("User-Agent")
 	if ua == "" {
 		ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 	}

@@ -4,7 +4,7 @@ WORKDIR /workspace
 ENV GOTOOLCHAIN=local
 
 COPY ./ ./
-RUN go build -ldflags="-s -w" -o goondvr .
+RUN go build -trimpath -ldflags="-s -w" -o goondvr .
 
 FROM alpine:3 AS runnable
 RUN apk --no-cache add ca-certificates ffmpeg

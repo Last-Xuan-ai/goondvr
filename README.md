@@ -24,9 +24,19 @@ Example dashboard and settings views from the current web UI.
 
 ![Settings](docs/screenshots/settings.png)
 
+# Stripchat cookie fix (this fork)
+
+This fork fixes credential handling in GoondVR 4.0.1. Download the patched binaries from [Last-Xuan-ai/goondvr Releases](https://github.com/Last-Xuan-ai/goondvr/releases).
+
+- In **Settings → Stripchat Browser Import**, paste Chrome or Firefox **Copy as cURL** from a successful request to `stripchat.com`, then save. Choose **cURL (bash)** when offered. Chrome's `-b` cookie option is supported.
+- Alternatively, fill **Stripchat Cookies** and **Stripchat User Agent** from the same browser request. Stripchat and Chaturbate credentials are stored separately, and Stripchat cookies are sent to its API and player page, never to media CDNs.
+- A Stripchat cURL request pasted into the original Browser Import box is also recognized and saved to the Stripchat fields. Existing saved cookies cannot be identified by site automatically: if you previously pasted Stripchat cookies into the original box, move them to the new Stripchat fields.
+- CLI: use `--site stripchat --cookies 'name=value' --user-agent 'browser UA'`, or the explicit `--stripchat-cookies` / `--stripchat-user-agent` flags. You no longer need the `--domain` workaround. Existing `--domain https://stripchat.com/` configurations remain supported; remove that flag when using the new per-site fields.
+- The browser and DVR should use the same proxy exit. Refresh the browser credentials after changing exits. This fixes missing/misrouted cookies; it does not guarantee that Cloudflare will accept a non-browser HTTP client. Browser Fallback remains available.
+
 # Getting Started
 
-Go to the [📦 Releases page](https://github.com/HeapOfChaos/goondvr/releases) and download the appropriate binary. (e.g., `windows_amd64_goondvr.exe`)
+Go to the [📦 Releases page](https://github.com/Last-Xuan-ai/goondvr/releases) and download the appropriate binary. (e.g., `windows_amd64_goondvr.exe`)
 
 ## 🌐 Launching the Web UI
 
@@ -66,7 +76,7 @@ This starts recording immediately. The Web UI will be disabled.
 
 ## 🐳 Running with Docker
 
-Pre-built image from [GitHub Container Registry](https://github.com/HeapOfChaos/goondvr/pkgs/container/goondvr):
+Pre-built image from [GitHub Container Registry](https://github.com/Last-Xuan-ai/goondvr/pkgs/container/goondvr):
 
 Persist `./videos` for recordings and `./conf` for saved channels and settings.
 
@@ -81,7 +91,7 @@ $ docker run -d \
     -p 8080:8080 \
     -v "./videos:/usr/src/app/videos" \
     -v "./conf:/usr/src/app/conf" \
-    ghcr.io/heapofchaos/goondvr:latest
+    ghcr.io/last-xuan-ai/goondvr:latest
 ```
 
 ...Or build your own image using the Dockerfile in this repository.
@@ -125,7 +135,9 @@ Available options:
 --port value, -p value      Port for the web interface and API (default: "8080")
 --interval value            Check if the channel is online every N minutes (default: 1)
 --cookies value             Cookies to use in the request (format: key=value; key2=value2)
---user-agent value          Custom User-Agent for the request
+--user-agent value          Custom User-Agent for the selected site
+--stripchat-cookies value   Stripchat cookies (separate from Chaturbate)
+--stripchat-user-agent value Stripchat browser User-Agent
 --browser-mode value        Browser-backed fallback for Chaturbate and Stripchat: off, local, or remote (default: "off")
 --browser-path value        Browser executable for local/helper browser mode (default: "chromium")
 --browser-profile-dir value Persistent browser profile directory for browser mode (default: "./conf/browser-profile")

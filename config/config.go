@@ -7,7 +7,7 @@ import (
 
 // New initializes a new Config struct with values from the CLI context.
 func New(c *cli.Context) (*entity.Config, error) {
-	return &entity.Config{
+	cfg := &entity.Config{
 		Version:             c.App.Version,
 		Username:            c.String("username"),
 		Site:                entity.NormalizeSite(c.String("site")),
@@ -41,7 +41,14 @@ func New(c *cli.Context) (*entity.Config, error) {
 		BrowserBootstrap:    c.Bool("browser-bootstrap"),
 		BrowserBootstrapURL: c.String("browser-bootstrap-url"),
 		StripchatPDKey:      c.String("stripchat-pdkey"),
-	}, nil
+	}
+	// Generic CLI credentials belong to the explicitly selected site.
+	// Persisted Chaturbate settings must not become Stripchat credentials.
+	if cfg.Site == "stripchat" {
+		cfg.Cookies, cfg.UserAgent = "", ""
+	}
+	applyCredentialOverrides(cfg, c)
+	return cfg, nil
 }
 
 // ApplyExplicitOverrides reapplies command-line flags that were explicitly set
@@ -80,12 +87,7 @@ func ApplyExplicitOverrides(cfg *entity.Config, c *cli.Context) {
 	if c.IsSet("interval") {
 		cfg.Interval = c.Int("interval")
 	}
-	if c.IsSet("cookies") {
-		cfg.Cookies = c.String("cookies")
-	}
-	if c.IsSet("user-agent") {
-		cfg.UserAgent = c.String("user-agent")
-	}
+	applyCredentialOverrides(cfg, c)
 	if c.IsSet("domain") {
 		cfg.Domain = c.String("domain")
 	}
@@ -142,5 +144,25 @@ func ApplyExplicitOverrides(cfg *entity.Config, c *cli.Context) {
 	}
 	if c.IsSet("stripchat-pdkey") {
 		cfg.StripchatPDKey = c.String("stripchat-pdkey")
+	}
+}
+
+// Site-specific flags take precedence over the generic CLI aliases.
+func applyCredentialOverrides(cfg *entity.Config, c *cli.Context) {
+	cookies, userAgent := &cfg.Cookies, &cfg.UserAgent
+	if cfg.Site == "stripchat" {
+		cookies, userAgent = &cfg.StripchatCookies, &cfg.StripchatUserAgent
+	}
+	if c.IsSet("cookies") {
+		*cookies = c.String("cookies")
+	}
+	if c.IsSet("user-agent") {
+		*userAgent = c.String("user-agent")
+	}
+	if c.IsSet("stripchat-cookies") {
+		cfg.StripchatCookies = c.String("stripchat-cookies")
+	}
+	if c.IsSet("stripchat-user-agent") {
+		cfg.StripchatUserAgent = c.String("stripchat-user-agent")
 	}
 }

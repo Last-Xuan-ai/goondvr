@@ -83,6 +83,8 @@ const siteAwareDefaultPattern = "videos/{{if ne .Site \"chaturbate\"}}{{.Site}}/
 type settings struct {
 	Cookies             string `json:"cookies"`
 	UserAgent           string `json:"user_agent"`
+	StripchatCookies    string `json:"stripchat_cookies,omitempty"`
+	StripchatUserAgent  string `json:"stripchat_user_agent,omitempty"`
 	BrowserMode         string `json:"browser_mode,omitempty"`
 	BrowserPath         string `json:"browser_path,omitempty"`
 	BrowserProfileDir   string `json:"browser_profile_dir,omitempty"`
@@ -154,6 +156,8 @@ func SaveSettings() error {
 	s := settings{
 		Cookies:             server.Config.Cookies,
 		UserAgent:           server.Config.UserAgent,
+		StripchatCookies:    server.Config.StripchatCookies,
+		StripchatUserAgent:  server.Config.StripchatUserAgent,
 		BrowserMode:         server.Config.BrowserMode,
 		BrowserPath:         server.Config.BrowserPath,
 		BrowserProfileDir:   server.Config.BrowserProfileDir,
@@ -213,6 +217,8 @@ func LoadSettings() error {
 	if s.UserAgent != "" {
 		server.Config.UserAgent = s.UserAgent
 	}
+	server.Config.StripchatCookies = s.StripchatCookies
+	server.Config.StripchatUserAgent = s.StripchatUserAgent
 	if s.BrowserMode != "" {
 		server.Config.BrowserMode = entity.NormalizeBrowserMode(s.BrowserMode)
 	}

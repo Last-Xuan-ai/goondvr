@@ -201,31 +201,50 @@ func (h *Req) SetRequestHeaders(req *http.Request) {
 		// Do NOT send it to CDN media hosts (mmcdn.com) as it may cause rejection.
 		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	}
-	if server.Config.UserAgent != "" {
-		req.Header.Set("User-Agent", server.Config.UserAgent)
+	SetSiteAuthHeaders(req)
+}
+
+// SetSiteAuthHeaders applies the credentials for the destination site. Cookies
+// never accompany requests to a different site or to the Stripchat media CDN.
+func SetSiteAuthHeaders(req *http.Request) {
+	if server.Config == nil || req.URL == nil {
+		return
 	}
-	if shouldSendConfiguredCookies(req.URL) {
-		if cookieHeader := NormalizeCookieString(server.Config.Cookies); cookieHeader != "" {
-			req.Header.Set("Cookie", cookieHeader)
+	host := strings.ToLower(req.URL.Hostname())
+	userAgent := server.Config.UserAgent
+	cookieHeader := ""
+	if matchesDomain(host, "stripchat.com") {
+		cookieHeader = server.Config.StripchatCookies
+		// Keep the pre-fix --domain workaround working for existing installs.
+		if cookieHeader == "" && configuredCookieHost() == "stripchat.com" {
+			cookieHeader = server.Config.Cookies
 		}
+		if server.Config.StripchatUserAgent != "" {
+			userAgent = server.Config.StripchatUserAgent
+		}
+	} else if matchesDomain(host, "doppiocdn.com") || matchesDomain(host, "doppiocdn.net") || matchesDomain(host, "strpst.com") {
+		if server.Config.StripchatUserAgent != "" {
+			userAgent = server.Config.StripchatUserAgent
+		}
+	} else {
+		cookieHost := configuredCookieHost()
+		if cookieHost == "" {
+			cookieHost = "chaturbate.com"
+		}
+		if matchesDomain(host, cookieHost) {
+			cookieHeader = server.Config.Cookies
+		}
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	if cookieHeader = NormalizeCookieString(cookieHeader); cookieHeader != "" {
+		req.Header.Set("Cookie", cookieHeader)
 	}
 }
 
-func shouldSendConfiguredCookies(target *url.URL) bool {
-	if target == nil {
-		return false
-	}
-
-	host := strings.ToLower(target.Hostname())
-	if host == "" {
-		return false
-	}
-
-	if configuredHost := configuredCookieHost(); configuredHost != "" {
-		return host == configuredHost || strings.HasSuffix(host, "."+configuredHost)
-	}
-
-	return host == "chaturbate.com" || strings.HasSuffix(host, ".chaturbate.com")
+func matchesDomain(host, domain string) bool {
+	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
 func configuredCookieHost() string {
@@ -379,82 +398,6 @@ func MergeCookieUpdate(existing, incoming string) string {
 	}
 
 	return serializeCookieEntries(filterImportedCookieEntries(existingEntries))
-}
-
-// ExtractBrowserImport parses a browser-exported request blob, such as Firefox
-// "Copy as cURL", and extracts the Cookie and User-Agent headers when present.
-func ExtractBrowserImport(raw string) (cookieHeader, userAgent string) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", ""
-	}
-
-	headerLines := extractHeaderLines(raw)
-	for _, headerLine := range headerLines {
-		name, value, ok := strings.Cut(headerLine, ":")
-		if !ok {
-			continue
-		}
-
-		switch strings.ToLower(strings.TrimSpace(name)) {
-		case "cookie":
-			cookieHeader = serializeCookieEntries(filterImportedCookieEntries(parseCookieEntries(value)))
-		case "user-agent":
-			userAgent = strings.TrimSpace(value)
-		}
-	}
-
-	return cookieHeader, userAgent
-}
-
-func extractHeaderLines(raw string) []string {
-	normalized := strings.ReplaceAll(raw, "\\\r\n", " ")
-	normalized = strings.ReplaceAll(normalized, "\\\n", " ")
-
-	var headers []string
-	segments := strings.Split(normalized, "-H ")
-	if len(segments) > 1 {
-		for _, segment := range segments[1:] {
-			segment = strings.TrimSpace(segment)
-			if segment == "" {
-				continue
-			}
-
-			headerLine, ok := parseQuotedSegment(segment)
-			if ok {
-				headers = append(headers, headerLine)
-			}
-		}
-		if len(headers) > 0 {
-			return headers
-		}
-	}
-
-	for _, line := range strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == '\r' }) {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToLower(line), "cookie:") || strings.HasPrefix(strings.ToLower(line), "user-agent:") {
-			headers = append(headers, line)
-		}
-	}
-	return headers
-}
-
-func parseQuotedSegment(segment string) (string, bool) {
-	if segment == "" {
-		return "", false
-	}
-
-	quote := segment[0]
-	if quote != '\'' && quote != '"' {
-		return "", false
-	}
-
-	end := strings.IndexByte(segment[1:], quote)
-	if end < 0 {
-		return "", false
-	}
-
-	return segment[1 : 1+end], true
 }
 
 func cookieDebugInfo(cookieStr string) []string {

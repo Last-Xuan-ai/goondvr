@@ -145,33 +145,36 @@ func Stats(c *gin.Context) {
 
 // UpdateConfigRequest represents the request body for updating configuration.
 type UpdateConfigRequest struct {
-	BrowserExport       string `form:"browser_export"`
-	Cookies             string `form:"cookies"`
-	UserAgent           string `form:"user_agent"`
-	BrowserMode         string `form:"browser_mode"`
-	BrowserPath         string `form:"browser_path"`
-	BrowserProfileDir   string `form:"browser_profile_dir"`
-	BrowserHelperURL    string `form:"browser_helper_url"`
-	BrowserHelperToken  string `form:"browser_helper_token"`
-	BrowserDebugPort    int    `form:"browser_debug_port"`
-	BrowserBootstrap    bool   `form:"browser_bootstrap"`
-	BrowserBootstrapURL string `form:"browser_bootstrap_url"`
-	CompletedDir        string `form:"completed_dir"`
-	FinalizeMode        string `form:"finalize_mode"`
-	FFmpegEncoder       string `form:"ffmpeg_encoder"`
-	FFmpegContainer     string `form:"ffmpeg_container"`
-	FFmpegQuality       int    `form:"ffmpeg_quality"`
-	FFmpegPreset        string `form:"ffmpeg_preset"`
-	NtfyURL             string `form:"ntfy_url"`
-	NtfyTopic           string `form:"ntfy_topic"`
-	NtfyToken           string `form:"ntfy_token"`
-	DiscordWebhookURL   string `form:"discord_webhook_url"`
-	DiskWarningPercent  int    `form:"disk_warning_percent"`
-	DiskCriticalPercent int    `form:"disk_critical_percent"`
-	CFChannelThreshold  int    `form:"cf_channel_threshold"`
-	CFGlobalThreshold   int    `form:"cf_global_threshold"`
-	NotifyCooldownHours int    `form:"notify_cooldown_hours"`
-	NotifyStreamOnline  bool   `form:"notify_stream_online"`
+	BrowserExport          string  `form:"browser_export"`
+	StripchatBrowserExport string  `form:"stripchat_browser_export"`
+	StripchatCookies       *string `form:"stripchat_cookies"`
+	StripchatUserAgent     *string `form:"stripchat_user_agent"`
+	Cookies                string  `form:"cookies"`
+	UserAgent              string  `form:"user_agent"`
+	BrowserMode            string  `form:"browser_mode"`
+	BrowserPath            string  `form:"browser_path"`
+	BrowserProfileDir      string  `form:"browser_profile_dir"`
+	BrowserHelperURL       string  `form:"browser_helper_url"`
+	BrowserHelperToken     string  `form:"browser_helper_token"`
+	BrowserDebugPort       int     `form:"browser_debug_port"`
+	BrowserBootstrap       bool    `form:"browser_bootstrap"`
+	BrowserBootstrapURL    string  `form:"browser_bootstrap_url"`
+	CompletedDir           string  `form:"completed_dir"`
+	FinalizeMode           string  `form:"finalize_mode"`
+	FFmpegEncoder          string  `form:"ffmpeg_encoder"`
+	FFmpegContainer        string  `form:"ffmpeg_container"`
+	FFmpegQuality          int     `form:"ffmpeg_quality"`
+	FFmpegPreset           string  `form:"ffmpeg_preset"`
+	NtfyURL                string  `form:"ntfy_url"`
+	NtfyTopic              string  `form:"ntfy_topic"`
+	NtfyToken              string  `form:"ntfy_token"`
+	DiscordWebhookURL      string  `form:"discord_webhook_url"`
+	DiskWarningPercent     int     `form:"disk_warning_percent"`
+	DiskCriticalPercent    int     `form:"disk_critical_percent"`
+	CFChannelThreshold     int     `form:"cf_channel_threshold"`
+	CFGlobalThreshold      int     `form:"cf_global_threshold"`
+	NotifyCooldownHours    int     `form:"notify_cooldown_hours"`
+	NotifyStreamOnline     bool    `form:"notify_stream_online"`
 }
 
 // UpdateConfig updates the server configuration.
@@ -182,20 +185,10 @@ func UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	cookieInput := req.Cookies
-	userAgentInput := req.UserAgent
-	if req.BrowserExport != "" {
-		importedCookies, importedUserAgent := internal.ExtractBrowserImport(req.BrowserExport)
-		if importedCookies != "" {
-			cookieInput = importedCookies
-		}
-		if importedUserAgent != "" {
-			userAgentInput = importedUserAgent
-		}
+	if err := updateBrowserCredentials(server.Config, req); err != nil {
+		c.String(http.StatusBadRequest, "Browser import: %s", err)
+		return
 	}
-
-	server.Config.Cookies = internal.MergeCookieUpdate(server.Config.Cookies, cookieInput)
-	server.Config.UserAgent = userAgentInput
 	server.Config.BrowserMode = entity.NormalizeBrowserMode(req.BrowserMode)
 	server.Config.BrowserPath = strings.TrimSpace(req.BrowserPath)
 	server.Config.BrowserProfileDir = strings.TrimSpace(req.BrowserProfileDir)
