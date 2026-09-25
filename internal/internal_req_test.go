@@ -56,3 +56,20 @@ func TestLegacyStripchatDomainWorkaround(t *testing.T) {
 		t.Fatal("legacy --domain workaround stopped working")
 	}
 }
+
+func TestStripchatDefaultUserAgentIsSiteScoped(t *testing.T) {
+	old := server.Config
+	t.Cleanup(func() { server.Config = old })
+	server.Config = &entity.Config{}
+	for _, host := range []string{"stripchat.com", "media-hls.doppiocdn.net", "mmp.doppiocdn.com", "chaturbate.com", "stripchat.com.example.org"} {
+		req, _ := http.NewRequest(http.MethodGet, "https://"+host+"/", nil)
+		NewReq().SetRequestHeaders(req)
+		want := ""
+		if host == "stripchat.com" || host == "media-hls.doppiocdn.net" || host == "mmp.doppiocdn.com" {
+			want = DefaultStripchatUserAgent
+		}
+		if req.Header.Get("User-Agent") != want || req.Header.Get("Cookie") != "" {
+			t.Fatalf("unexpected guest headers for %s", host)
+		}
+	}
+}

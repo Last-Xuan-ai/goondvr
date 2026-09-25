@@ -506,7 +506,7 @@ func setStripchatBrowserHeaders(req *http.Request) {
 	internal.SetSiteAuthHeaders(req)
 	ua := req.Header.Get("User-Agent")
 	if ua == "" {
-		ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+		ua = internal.DefaultStripchatUserAgent
 	}
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
@@ -554,13 +554,19 @@ func isHexOnly(s string) bool {
 }
 
 var (
-	reNativePKeyStart = regexp.MustCompile(`a\.uwghn\(a\[n\(777\)\]\(a\[o\(322\)\]\((\d+)\[n\(t\)\]\(36\)`)
-	reNativePKeyMid   = regexp.MustCompile(`(?s)\}\((\d+),(\d+)\),(\d+)\[s\(0,0,-309\)\]\(36\).*?\+(\d+)\.\.toString\(36\).*?,(\d+)\[s\(0,0,-309\)\]\(36\)`)
-	reNativePKeyEnd   = regexp.MustCompile(`(?s)\}\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)\)\)`)
-	rePlain16Alphanum = regexp.MustCompile(`^[a-zA-Z0-9]{16}$`)
+	reLiteralMediaPKey = regexp.MustCompile(`\.searchParams\s*\.\s*set\(\s*["']pkey["']\s*,\s*["']([a-zA-Z0-9]{16})["']\s*\)`)
+	reNativePKeyStart  = regexp.MustCompile(`a\.uwghn\(a\[n\(777\)\]\(a\[o\(322\)\]\((\d+)\[n\(t\)\]\(36\)`)
+	reNativePKeyMid    = regexp.MustCompile(`(?s)\}\((\d+),(\d+)\),(\d+)\[s\(0,0,-309\)\]\(36\).*?\+(\d+)\.\.toString\(36\).*?,(\d+)\[s\(0,0,-309\)\]\(36\)`)
+	reNativePKeyEnd    = regexp.MustCompile(`(?s)\}\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)\)\)`)
+	rePlain16Alphanum  = regexp.MustCompile(`^[a-zA-Z0-9]{16}$`)
 )
 
 func extractMediaPKey(js string) (string, bool) {
+	// Current MMP players set the playlist parameter directly. Prefer this
+	// value to the legacy obfuscated form and to the master playlist decoys.
+	if match := reLiteralMediaPKey.FindStringSubmatch(js); len(match) == 2 {
+		return match[1], true
+	}
 	start := reNativePKeyStart.FindStringSubmatchIndex(js)
 	if len(start) == 0 {
 		return "", false

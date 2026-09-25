@@ -15,6 +15,10 @@ import (
 	"github.com/HeapOfChaos/goondvr/server"
 )
 
+// DefaultStripchatUserAgent is used when no browser credentials were imported.
+// Stripchat rejects the Go HTTP client's default User-Agent on its public APIs.
+const DefaultStripchatUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
 // Req represents an HTTP client with customized settings.
 type Req struct {
 	client  *http.Client
@@ -211,9 +215,11 @@ func SetSiteAuthHeaders(req *http.Request) {
 		return
 	}
 	host := strings.ToLower(req.URL.Hostname())
+	stripchatHost := matchesDomain(host, "stripchat.com")
+	stripchatMediaHost := matchesDomain(host, "doppiocdn.com") || matchesDomain(host, "doppiocdn.net") || matchesDomain(host, "strpst.com")
 	userAgent := server.Config.UserAgent
 	cookieHeader := ""
-	if matchesDomain(host, "stripchat.com") {
+	if stripchatHost {
 		cookieHeader = server.Config.StripchatCookies
 		// Keep the pre-fix --domain workaround working for existing installs.
 		if cookieHeader == "" && configuredCookieHost() == "stripchat.com" {
@@ -222,7 +228,7 @@ func SetSiteAuthHeaders(req *http.Request) {
 		if server.Config.StripchatUserAgent != "" {
 			userAgent = server.Config.StripchatUserAgent
 		}
-	} else if matchesDomain(host, "doppiocdn.com") || matchesDomain(host, "doppiocdn.net") || matchesDomain(host, "strpst.com") {
+	} else if stripchatMediaHost {
 		if server.Config.StripchatUserAgent != "" {
 			userAgent = server.Config.StripchatUserAgent
 		}
@@ -234,6 +240,9 @@ func SetSiteAuthHeaders(req *http.Request) {
 		if matchesDomain(host, cookieHost) {
 			cookieHeader = server.Config.Cookies
 		}
+	}
+	if userAgent == "" && (stripchatHost || stripchatMediaHost) {
+		userAgent = DefaultStripchatUserAgent
 	}
 	if userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)

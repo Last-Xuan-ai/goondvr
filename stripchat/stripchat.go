@@ -76,7 +76,7 @@ func mapGender(g string) string {
 
 // FetchStream implements site.Site. Returns StreamInfo when online, nil when offline.
 func (s *Stripchat) FetchStream(ctx context.Context, req *internal.Req, username string) (*site.StreamInfo, error) {
-	info, err := fetchStreamViaLegacyAPI(ctx, req, username)
+	info, err := fetchStreamViaAPI(ctx, req, username)
 	if err == nil ||
 		errors.Is(err, internal.ErrChannelOffline) ||
 		errors.Is(err, internal.ErrPrivateStream) {
@@ -97,8 +97,26 @@ func (s *Stripchat) FetchStream(ctx context.Context, req *internal.Req, username
 	return nil, err
 }
 
-func fetchStreamViaLegacyAPI(ctx context.Context, req *internal.Req, username string) (*site.StreamInfo, error) {
-	apiURL := fmt.Sprintf("https://stripchat.com/api/front/v2/models/username/%s/cam", username)
+func fetchStreamViaAPI(ctx context.Context, req *internal.Req, username string) (*site.StreamInfo, error) {
+	// The username-based cam endpoint now returns HTTP 418 even for public
+	// rooms. Resolve the current ID before calling the supported cam endpoint.
+	// Resolve on each poll so a renamed/reassigned username cannot keep recording
+	// a previously cached account.
+	idURL := "https://stripchat.com/api/front/users/user-ids/" + url.PathEscape(username)
+	body, err := req.Get(ctx, idURL)
+	if err != nil {
+		return nil, fmt.Errorf("stripchat: resolve user ID: %w", err)
+	}
+	var userID struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(body), &userID); err != nil {
+		return nil, fmt.Errorf("stripchat: parse user ID response: %w", err)
+	}
+	if userID.ID <= 0 {
+		return nil, fmt.Errorf("stripchat: user ID response missing a positive ID")
+	}
+	apiURL := fmt.Sprintf("https://stripchat.com/api/front/v2/models/%d/cam", userID.ID)
 
 	httpReq, cancel, err := req.CreateRequest(ctx, apiURL)
 	if err != nil {
@@ -114,7 +132,7 @@ func fetchStreamViaLegacyAPI(ctx context.Context, req *internal.Req, username st
 	httpReq.Header.Set("Sec-Fetch-Site", "same-origin")
 	httpReq.Header.Set("X-Requested-With", "XMLHttpRequest")
 
-	body, err := req.DoRequest(httpReq)
+	body, err = req.DoRequest(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("stripchat: fetch cam: %w", err)
 	}

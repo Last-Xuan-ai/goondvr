@@ -26,7 +26,11 @@ Example dashboard and settings views from the current web UI.
 
 # Stripchat cookie fix (this fork)
 
-This fork fixes credential handling in GoondVR 4.0.1. Download the patched binaries from [Last-Xuan-ai/goondvr Releases](https://github.com/Last-Xuan-ai/goondvr/releases).
+This fork fixes Stripchat API discovery and credential handling in GoondVR 4.0.1. Download the patched binaries from [Last-Xuan-ai/goondvr Releases](https://github.com/Last-Xuan-ai/goondvr/releases).
+
+Version `4.0.1-stripchat.2` replaces the old username-based `/cam` endpoint, which returns HTTP 418, with `/api/front/users/user-ids/{username}` followed by `/api/front/v2/models/{id}/cam`. Public rooms can be checked and recorded through ordinary HTTP requests with **Browser Fallback → Off**; a running browser is not required. An HTTP 418 from the old endpoint does not necessarily mean the imported cookies are invalid. Existing site-specific credentials remain supported when needed.
+
+The update also supplies a default Stripchat User-Agent for guest requests and recognizes the current MMP player's literal playlist `pkey` assignment. Older obfuscated player versions remain supported. Player parameters are discovered at runtime; no account credentials or fixed live playback keys are bundled.
 
 - In **Settings → Stripchat Browser Import**, paste Chrome or Firefox **Copy as cURL** from a successful request to `stripchat.com`, then save. Choose **cURL (bash)** when offered. Chrome's `-b` cookie option is supported.
 - Alternatively, fill **Stripchat Cookies** and **Stripchat User Agent** from the same browser request. Stripchat and Chaturbate credentials are stored separately, and Stripchat cookies are sent to its API and player page, never to media CDNs.
