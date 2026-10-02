@@ -124,6 +124,20 @@ func (h *Req) GetBytes(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("forbidden: %w", ErrPrivateStream)
 	}
 
+	// Never treat an error page (or an empty response) as a downloaded media
+	// segment. Otherwise it gets written to the recording and masks a stall.
+	if h.isMedia {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("media HTTP %d from %s", resp.StatusCode, req.URL.Hostname())
+		}
+		if len(b) == 0 {
+			return nil, fmt.Errorf("empty media response from %s", req.URL.Hostname())
+		}
+		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
+			return nil, fmt.Errorf("HTML response instead of media from %s", req.URL.Hostname())
+		}
+	}
+
 	return b, err
 }
 

@@ -499,9 +499,12 @@ type Playlist struct {
 	RootURL          string // base for resolving video segment URIs
 	Resolution       int
 	Framerate        int
-	FileExt          string        // ".ts" for legacy HLS, ".mp4" for LL-HLS fMP4
-	Client           *internal.Req // reuse the same client that fetched the master playlist
-	MouflonPDKey     string        // Stripchat MOUFLON v2 decryption key; empty for Chaturbate
+	FileExt          string               // ".ts" for legacy HLS, ".mp4" for LL-HLS fMP4
+	Client           *internal.Req        // reuse the same client that fetched the master playlist
+	MouflonPDKey     string               // Stripchat MOUFLON v2 decryption key; empty for Chaturbate
+	Logf             func(string, ...any) // channel-scoped, persistent diagnostics
+	testPollDelay    time.Duration        // private overrides for deterministic local tests
+	testStallTimeout time.Duration
 }
 
 // VideoResolution represents a video resolution and its corresponding framerate URLs.
@@ -627,10 +630,22 @@ type WatchHandler func(b []byte, duration float64) error
 // For LL-HLS streams with a separate audio rendition it automatically muxes
 // audio and video into a single fragmented MP4 output stream.
 func (p *Playlist) WatchSegments(ctx context.Context, handler WatchHandler) error {
-	if p.AudioPlaylistURL != "" {
-		return p.watchMuxedSegments(ctx, handler)
+	timeout := mediaStallTimeout
+	if p.testStallTimeout > 0 {
+		timeout = p.testStallTimeout
 	}
-	return p.watchVideoOnlySegments(ctx, handler)
+	progress := newStreamProgress(ctx, timeout, p.AudioPlaylistURL != "", p.diagnostic)
+	defer progress.close()
+	var err error
+	if p.AudioPlaylistURL != "" {
+		err = p.watchMuxedSegments(progress.ctx, handler, progress)
+	} else {
+		err = p.watchVideoOnlySegments(progress.ctx, handler, progress)
+	}
+	if cause := context.Cause(progress.ctx); cause != nil {
+		return cause
+	}
+	return err
 }
 
 // safeDecodeFrom wraps m3u8.DecodeFrom with a recover so that library panics
@@ -743,7 +758,7 @@ func normalizeM3U8(resp string) string {
 }
 
 // watchVideoOnlySegments is the original single-track segment loop.
-func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHandler) error {
+func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHandler, progress *streamProgress) error {
 	client := p.Client
 	if client == nil {
 		client = internal.NewMediaReq()
@@ -759,16 +774,23 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 	var trackBaseTimes map[uint32]uint64
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		resp, err := client.Get(ctx, p.PlaylistURL)
 		if err != nil {
+			progress.problem("video", "playlist", -1, err)
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("get playlist: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		pl, _, err := safeDecodeFrom(strings.NewReader(normalizeM3U8(decodeMouflon(resp, p.MouflonPDKey))))
 		if err != nil {
+			progress.problem("video", "playlist parse", -1, err)
 			if server.Config.Debug {
 				fmt.Printf("[DEBUG] variant playlist parse failed: %v\n", err)
 				fmt.Printf("[DEBUG]   Playlist URL: %s\n", p.PlaylistURL)
@@ -781,7 +803,9 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("decode from: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		playlist, ok := pl.(*m3u8.MediaPlaylist)
@@ -789,6 +813,7 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 			return fmt.Errorf("cast to media playlist")
 		}
 		consecutiveErrors = 0
+		progress.playlist("video", playlist)
 
 		if server.Config.Debug {
 			var count int
@@ -805,12 +830,7 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 			if v == nil {
 				continue
 			}
-			seq := internal.SegmentSeq(v.URI)
-			// Fall back to the HLS media sequence number (v.SeqId) when the URI
-			// doesn't contain a parseable sequence (e.g. Stripchat .mp4 segments).
-			if seq == -1 && v.SeqId > 0 {
-				seq = int(v.SeqId)
-			}
+			seq := mediaSegmentSequence(v)
 			if server.Config.Debug && lastSeq == -1 && lastSegURI == "" {
 				fmt.Printf("[DEBUG] first segment URI: %s (seq=%d)\n", v.URI, seq)
 			}
@@ -818,13 +838,11 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 				if seq <= lastSeq {
 					continue
 				}
-				lastSeq = seq
 			} else {
 				if v.URI == lastSegURI {
 					continue
 				}
 			}
-			lastSegURI = v.URI
 			if v.Map != nil && v.Map.URI != lastMapURI {
 				mapURL := resolveHLSURL(p.RootURL, v.Map.URI)
 				initBytes, err := client.GetBytes(ctx, mapURL)
@@ -836,8 +854,6 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 				}
 				lastMapURI = v.Map.URI
 			}
-
-			lastSeq = seq
 
 			pipeline := func() ([]byte, error) {
 				return client.GetBytes(ctx, resolveHLSURL(p.RootURL, v.URI))
@@ -853,7 +869,9 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 				}),
 			)
 			if err != nil {
+				progress.failed("video", seq, err)
 				if errors.Is(err, internal.ErrNotFound) {
+					lastSeq, lastSegURI = seq, v.URI
 					if server.Config.Debug {
 						fmt.Printf("[DEBUG] segment 404 (skipping): seq=%d %s\n", seq, resolveHLSURL(p.RootURL, v.URI))
 					}
@@ -874,9 +892,16 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 			if err := handler(resp, v.Duration); err != nil {
 				return fmt.Errorf("handler: %w", err)
 			}
+			lastSeq, lastSegURI = seq, v.URI
+			progress.written("video", len(resp), v.Duration)
 		}
 
-		<-time.After(1 * time.Second)
+		if playlist.Closed {
+			return fmt.Errorf("media playlist ended; refresh stream status")
+		}
+		if err := waitForPoll(ctx, p.pollDelay()); err != nil {
+			return err
+		}
 	}
 }
 
@@ -885,7 +910,7 @@ func (p *Playlist) watchVideoOnlySegments(ctx context.Context, handler WatchHand
 // audio moof+mdat fragments. Audio track_id is renumbered to 2.
 // tfdt decode times are normalised to start from zero so players display the
 // correct recording position rather than the CDN stream uptime offset.
-func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler) error {
+func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler, progress *streamProgress) error {
 	client := p.Client
 	if client == nil {
 		client = internal.NewMediaReq()
@@ -958,53 +983,74 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 		if len(chunk) == 0 {
 			return nil
 		}
-		return handler(chunk, duration)
+		if err := handler(chunk, duration); err != nil {
+			return err
+		}
+		progress.written("video", len(rawVideo), duration)
+		progress.written("audio", len(rawAudio), 0)
+		return nil
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Fetch video playlist
 		videoResp, err := client.Get(ctx, p.PlaylistURL)
 		if err != nil {
+			progress.problem("video", "playlist", -1, err)
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("get video playlist: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		vpl, _, err := safeDecodeFrom(strings.NewReader(normalizeM3U8(decodeMouflon(videoResp, p.MouflonPDKey))))
 		if err != nil {
+			progress.problem("video", "playlist parse", -1, err)
 			if server.Config.Debug {
 				fmt.Printf("[DEBUG] muxed: video playlist parse failed: %v\n", err)
 			}
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("decode video playlist: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		videoPlaylist, ok := vpl.(*m3u8.MediaPlaylist)
 		if !ok {
 			return fmt.Errorf("cast video playlist to media playlist")
 		}
+		progress.playlist("video", videoPlaylist)
 
 		// Fetch audio playlist
 		audioResp, err := client.Get(ctx, p.AudioPlaylistURL)
 		if err != nil {
+			progress.problem("audio", "playlist", -1, err)
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("get audio playlist: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		apl, _, err := safeDecodeFrom(strings.NewReader(normalizeM3U8(decodeMouflon(audioResp, p.MouflonPDKey))))
 		if err != nil {
+			progress.problem("audio", "playlist parse", -1, err)
 			if server.Config.Debug {
 				fmt.Printf("[DEBUG] muxed: audio playlist parse failed: %v\n", err)
 			}
 			if consecutiveErrors++; consecutiveErrors >= 5 {
 				return fmt.Errorf("decode audio playlist: %w", err)
 			}
-			<-time.After(2 * time.Second)
+			if err := waitForPoll(ctx, 2*p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 		audioPlaylist, ok := apl.(*m3u8.MediaPlaylist)
@@ -1012,6 +1058,7 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 			return fmt.Errorf("cast audio playlist to media playlist")
 		}
 		consecutiveErrors = 0
+		progress.playlist("audio", audioPlaylist)
 
 		// Collect video init segment (EXT-X-MAP)
 		for _, v := range videoPlaylist.Segments {
@@ -1079,7 +1126,9 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 			initWritten = true
 		}
 		if !initWritten {
-			<-time.After(1 * time.Second)
+			if err := waitForPoll(ctx, p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -1087,6 +1136,8 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 		// issues, and fall back to URI-string dedup when seq is unavailable.
 		type segInfo struct {
 			url      string
+			uri      string
+			seq      int
 			duration float64
 		}
 		var newVideoSegs []segInfo
@@ -1094,7 +1145,7 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 			if v == nil {
 				continue
 			}
-			seq := internal.SegmentSeq(v.URI)
+			seq := mediaSegmentSequence(v)
 			if server.Config.Debug && lastVideoSeq == -1 && lastVideoURI == "" {
 				fmt.Printf("[DEBUG] muxed: first video segment URI: %s (seq=%d)\n", v.URI, seq)
 			}
@@ -1102,15 +1153,15 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				if seq <= lastVideoSeq {
 					continue
 				}
-				lastVideoSeq = seq
 			} else {
 				if v.URI == lastVideoURI {
 					continue
 				}
 			}
-			lastVideoURI = v.URI
 			newVideoSegs = append(newVideoSegs, segInfo{
 				url:      resolveHLSURL(p.RootURL, v.URI),
+				uri:      v.URI,
+				seq:      seq,
 				duration: v.Duration,
 			})
 		}
@@ -1119,7 +1170,7 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 			if v == nil {
 				continue
 			}
-			seq := internal.SegmentSeq(v.URI)
+			seq := mediaSegmentSequence(v)
 			if server.Config.Debug && lastAudioSeq == -1 && lastAudioURI == "" {
 				fmt.Printf("[DEBUG] muxed: first audio segment URI: %s (seq=%d)\n", v.URI, seq)
 			}
@@ -1127,15 +1178,15 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				if seq <= lastAudioSeq {
 					continue
 				}
-				lastAudioSeq = seq
 			} else {
 				if v.URI == lastAudioURI {
 					continue
 				}
 			}
-			lastAudioURI = v.URI
 			newAudioSegs = append(newAudioSegs, segInfo{
 				url:      resolveHLSURL(p.AudioPlaylistURL, v.URI),
+				uri:      v.URI,
+				seq:      seq,
 				duration: v.Duration,
 			})
 		}
@@ -1151,6 +1202,7 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 		// video-only run after a split. Keep Chaturbate on the original paired
 		// write order because it was already behaving correctly there.
 		if !isStripchatMux {
+			videoFailed, audioFailed := false, false
 			maxLen := len(newVideoSegs)
 			if len(newAudioSegs) > maxLen {
 				maxLen = len(newAudioSegs)
@@ -1160,7 +1212,7 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				var rawAudio []byte
 				var chunkDuration float64
 
-				if i < len(newVideoSegs) {
+				if i < len(newVideoSegs) && !videoFailed {
 					vseg := newVideoSegs[i]
 					vsegURL := vseg.url
 					segBytes, err := retry.DoWithData(
@@ -1169,8 +1221,10 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 						retry.Attempts(3),
 						retry.Delay(600*time.Millisecond),
 						retry.DelayType(retry.FixedDelay),
+						retry.RetryIf(func(err error) bool { return !errors.Is(err, internal.ErrNotFound) }),
 					)
 					if err == nil {
+						lastVideoSeq, lastVideoURI = vseg.seq, vseg.uri
 						rawVideo = segBytes
 						chunkDuration = vseg.duration
 						if !videoBaseSet {
@@ -1179,9 +1233,16 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 								videoBaseSet = true
 							}
 						}
+					} else {
+						progress.failed("video", vseg.seq, err)
+						if errors.Is(err, internal.ErrNotFound) {
+							lastVideoSeq, lastVideoURI = vseg.seq, vseg.uri
+						} else {
+							videoFailed = true
+						}
 					}
 				}
-				if i < len(newAudioSegs) {
+				if i < len(newAudioSegs) && !audioFailed {
 					aseg := newAudioSegs[i]
 					asegURL := aseg.url
 					segBytes, err := retry.DoWithData(
@@ -1190,10 +1251,17 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 						retry.Attempts(3),
 						retry.Delay(600*time.Millisecond),
 						retry.DelayType(retry.FixedDelay),
+						retry.RetryIf(func(err error) bool { return !errors.Is(err, internal.ErrNotFound) }),
 					)
 					if err != nil {
-						fmt.Printf("[WARN] audio seg download failed: %v\n", err)
+						progress.failed("audio", aseg.seq, err)
+						if errors.Is(err, internal.ErrNotFound) {
+							lastAudioSeq, lastAudioURI = aseg.seq, aseg.uri
+						} else {
+							audioFailed = true
+						}
 					} else {
+						lastAudioSeq, lastAudioURI = aseg.seq, aseg.uri
 						rawAudio = segBytes
 						if !audioBaseSet {
 							if t, ok := extractMoofFirstTfdt(segBytes); ok {
@@ -1233,7 +1301,12 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				}
 			}
 
-			<-time.After(1 * time.Second)
+			if videoPlaylist.Closed || audioPlaylist.Closed {
+				return fmt.Errorf("media playlist ended; refresh stream status")
+			}
+			if err := waitForPoll(ctx, p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -1248,11 +1321,17 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				retry.Attempts(3),
 				retry.Delay(600*time.Millisecond),
 				retry.DelayType(retry.FixedDelay),
+				retry.RetryIf(func(err error) bool { return !errors.Is(err, internal.ErrNotFound) }),
 			)
 			if err != nil {
-				fmt.Printf("[WARN] video seg download failed: %v\n", err)
-				continue
+				progress.failed("video", vseg.seq, err)
+				if errors.Is(err, internal.ErrNotFound) {
+					lastVideoSeq, lastVideoURI = vseg.seq, vseg.uri
+					continue
+				}
+				break
 			}
+			lastVideoSeq, lastVideoURI = vseg.seq, vseg.uri
 
 			rawTfdt, ok := extractMoofFirstTfdt(segBytes)
 			if !videoBaseSet && ok {
@@ -1275,11 +1354,17 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 				retry.Attempts(3),
 				retry.Delay(600*time.Millisecond),
 				retry.DelayType(retry.FixedDelay),
+				retry.RetryIf(func(err error) bool { return !errors.Is(err, internal.ErrNotFound) }),
 			)
 			if err != nil {
-				fmt.Printf("[WARN] audio seg download failed: %v\n", err)
-				continue
+				progress.failed("audio", aseg.seq, err)
+				if errors.Is(err, internal.ErrNotFound) {
+					lastAudioSeq, lastAudioURI = aseg.seq, aseg.uri
+					continue
+				}
+				break
 			}
+			lastAudioSeq, lastAudioURI = aseg.seq, aseg.uri
 
 			rawTfdt, ok := extractMoofFirstTfdt(segBytes)
 			if !audioBaseSet && ok {
@@ -1299,7 +1384,9 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 		}
 		if !syncBaseComputed {
 			pendingStripchat = append(pendingStripchat, cyclePending...)
-			<-time.After(1 * time.Second)
+			if err := waitForPoll(ctx, p.pollDelay()); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -1341,9 +1428,15 @@ func (p *Playlist) watchMuxedSegments(ctx context.Context, handler WatchHandler)
 			if err := handler(seg.data, seg.duration); err != nil {
 				return fmt.Errorf("handler muxed segment: %w", err)
 			}
+			progress.written(seg.track, len(seg.data), seg.duration)
 		}
 		pendingStripchat = nil
 
-		<-time.After(1 * time.Second)
+		if videoPlaylist.Closed || audioPlaylist.Closed {
+			return fmt.Errorf("media playlist ended; refresh stream status")
+		}
+		if err := waitForPoll(ctx, p.pollDelay()); err != nil {
+			return err
+		}
 	}
 }

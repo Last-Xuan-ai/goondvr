@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/HeapOfChaos/goondvr/config"
@@ -27,9 +29,14 @@ const logo = `
 func main() {
 	app := &cli.App{
 		Name:    "goondvr",
-		Version: "4.0.1-stripchat.2",
+		Version: "4.0.1-stripchat.3",
 		Usage:   "Record your favorite streams automatically. 😎🫵",
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "log-file",
+				Usage: "Persistent diagnostic log (5 MiB plus 3 backups; empty disables)",
+				Value: "./logs/goondvr.log",
+			},
 			&cli.StringFlag{
 				Name:    "username",
 				Aliases: []string{"u"},
@@ -211,6 +218,27 @@ func main() {
 func start(c *cli.Context) error {
 	fmt.Println(logo)
 
+	var closeLog func()
+	var closeLogOnce sync.Once
+	if path := c.String("log-file"); path != "" {
+		var err error
+		closeLog, err = internal.EnableDiagnosticLog(path)
+		if err != nil {
+			log.Printf("WARN diagnostic log could not be opened: %v; continuing with console logs", err)
+		} else {
+			absolute, _ := filepath.Abs(path)
+			log.Printf("Diagnostic log: %s (5 MiB plus 3 backups)", absolute)
+		}
+	}
+	finishLog := func() {
+		if closeLog != nil {
+			closeLogOnce.Do(closeLog)
+		}
+	}
+	defer finishLog()
+	cwd, _ := os.Getwd()
+	log.Printf("Starting goondvr %s; working directory=%s; config directory=%s", c.App.Version, cwd, filepath.Join(cwd, "conf"))
+
 	var err error
 	server.Config, err = config.New(c)
 	if err != nil {
@@ -236,6 +264,7 @@ func start(c *cli.Context) error {
 		<-sigCh
 		fmt.Println("Shutting down, waiting for recordings to close and finalize...")
 		server.Manager.Shutdown()
+		finishLog()
 		os.Exit(0)
 	}()
 
@@ -249,6 +278,7 @@ func start(c *cli.Context) error {
 		}
 
 		fmt.Printf("Loaded %d channel(s). Server is ready.\n\n", len(server.Manager.ChannelInfo()))
+		log.Printf("Loaded %d channel(s)", len(server.Manager.ChannelInfo()))
 
 		return router.SetupRouter().Run(":" + c.String("port"))
 	}

@@ -28,6 +28,15 @@ Example dashboard and settings views from the current web UI.
 
 This fork fixes Stripchat API discovery and credential handling in GoondVR 4.0.1. Download the patched binaries from [Last-Xuan-ai/goondvr Releases](https://github.com/Last-Xuan-ai/goondvr/releases).
 
+Version `4.0.1-stripchat.3` adds stalled-recording recovery for both Chaturbate and Stripchat, plus persistent diagnostic logs:
+
+- A stream that writes no new media for 45 seconds is closed and finalized, then the monitor retries the room lookup after 10 seconds to obtain a fresh stream URL. Separate video and audio tracks are watched independently. A frozen playlist, a sequence reset, or repeated missing segments can no longer leave the recorder waiting indefinitely.
+- Temporary segment failures can be retried on the next playlist poll. Expired 404 segments are skipped without repeated immediate retries. HTTP error bodies, empty responses and HTML responses are not accepted as media.
+- Normal events are saved to `./logs/goondvr.log`, with a 5 MiB limit and three rotated backups. They include session start/end, elapsed versus written media duration, periodic progress, failed requests, sequence regressions and recovery reasons. `--log-file PATH` changes the destination; `--log-file ""` disables the file. Logs survive terminal closure and program restarts until rotated.
+- Normal diagnostic logs redact URL paths/query strings and credential headers. Explicit `--debug` dumps are separate, can contain sensitive data, and are not required for these diagnostics.
+
+Keep launching from the same working directory: `conf/`, `videos/`, and the default `logs/` location are relative to it. Startup logs now display the absolute working and configuration directories. Recovery cannot restore segments that were already missed, and this update does not establish the cause of any historical recording.
+
 Version `4.0.1-stripchat.2` replaces the old username-based `/cam` endpoint, which returns HTTP 418, with `/api/front/users/user-ids/{username}` followed by `/api/front/v2/models/{id}/cam`. Public rooms can be checked and recorded through ordinary HTTP requests with **Browser Fallback → Off**; a running browser is not required. An HTTP 418 from the old endpoint does not necessarily mean the imported cookies are invalid. Existing site-specific credentials remain supported when needed.
 
 The update also supplies a default Stripchat User-Agent for guest requests and recognizes the current MMP player's literal playlist `pkey` assignment. Older obfuscated player versions remain supported. Player parameters are discovered at runtime; no account credentials or fixed live playback keys are bundled.
@@ -129,6 +138,7 @@ Available options:
 ```
 --username value, -u value  The username of the channel to record
 --site value                Site to record from: chaturbate or stripchat (default: "chaturbate")
+--log-file value            Persistent diagnostics (default: "./logs/goondvr.log"; empty disables)
 --admin-username value      Username for web authentication (optional)
 --admin-password value      Password for web authentication (optional)
 --framerate value           Desired framerate (FPS) (default: 30)

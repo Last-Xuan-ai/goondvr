@@ -109,6 +109,8 @@ func (ch *Channel) Monitor(runID uint64) {
 				ch.Info("room requires a password, try again in %d min(s)", server.Config.Interval)
 			} else if errors.Is(err, context.Canceled) {
 				// ...
+			} else if errors.Is(err, internal.ErrStreamStalled) {
+				ch.Error("recording stalled: %s; refreshing stream URL in 10s", err)
 			} else {
 				ch.Error("on retry: %s: retrying in 10s", err.Error())
 			}
@@ -255,10 +257,29 @@ func (ch *Channel) RecordStream(ctx context.Context, runID uint64, s site.Site, 
 		}
 	}
 	ch.Info("stream type: %s, resolution %dp (target: %dp), framerate %dfps (target: %dfps)", streamType, playlist.Resolution, ch.Config.Resolution, playlist.Framerate, ch.Config.Framerate)
+	playlist.Logf = ch.Info
+	ch.fileMu.RLock()
+	filename := ch.File.Name()
+	ch.fileMu.RUnlock()
+	ch.Info("recording session started: site=%s file=%s stall_timeout=45s", ch.Config.Site, filename)
+	started := time.Now()
+	var writtenBytes int64
+	var mediaDuration float64
 
-	return playlist.WatchSegments(ctx, func(b []byte, duration float64) error {
-		return ch.handleSegmentForMonitor(runID, b, duration)
+	watchErr := playlist.WatchSegments(ctx, func(b []byte, duration float64) error {
+		if err := ch.handleSegmentForMonitor(runID, b, duration); err != nil {
+			return err
+		}
+		// Init data is cached by the handler, not yet written to the file.
+		if !isMP4InitSegment(b) {
+			writtenBytes += int64(len(b))
+			mediaDuration += duration
+		}
+		return nil
 	})
+	ch.Info("recording session ended: elapsed=%s media_seconds=%.1f media_bytes=%d reason=%v",
+		time.Since(started).Round(time.Second), mediaDuration, writtenBytes, watchErr)
+	return watchErr
 }
 
 // handleSegmentForMonitor processes and writes segment data for a specific

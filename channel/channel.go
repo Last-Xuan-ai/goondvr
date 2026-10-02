@@ -110,7 +110,7 @@ func (ch *Channel) WithCancel(ctx context.Context) (context.Context, context.Can
 
 // Info logs an informational message to both the browser log and stdout.
 func (ch *Channel) Info(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
+	msg := internal.RedactLogMessage(fmt.Sprintf(format, a...))
 	ch.sendLog(fmt.Sprintf("%s [INFO] %s", time.Now().Format("15:04"), msg))
 	log.Printf(" INFO [%s] %s", ch.Config.Username, msg)
 }
@@ -118,7 +118,7 @@ func (ch *Channel) Info(format string, a ...any) {
 // Verbose logs a message to the browser log always, and to stdout only when --debug is enabled.
 // Use this for high-frequency events (e.g. per-segment updates) that would clutter the console.
 func (ch *Channel) Verbose(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
+	msg := internal.RedactLogMessage(fmt.Sprintf(format, a...))
 	ch.sendLog(fmt.Sprintf("%s [INFO] %s", time.Now().Format("15:04"), msg))
 	if server.Config.Debug {
 		log.Printf(" INFO [%s] %s", ch.Config.Username, msg)
@@ -127,7 +127,7 @@ func (ch *Channel) Verbose(format string, a ...any) {
 
 // Error logs an error message to both the browser log and stdout.
 func (ch *Channel) Error(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
+	msg := internal.RedactLogMessage(fmt.Sprintf(format, a...))
 	ch.sendLog(fmt.Sprintf("%s [ERROR] %s", time.Now().Format("15:04"), msg))
 	log.Printf("ERROR [%s] %s", ch.Config.Username, msg)
 }
